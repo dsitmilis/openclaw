@@ -83,6 +83,7 @@ export { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
  * per pathname, protected with private file modes, and registered in the shared
  * OpenClaw state database for discovery and maintenance.
  */
+// v13 = one durable generation token per materialized session transcript.
 // v12 = session-owned ACP parent-stream events.
 // v11 = agent-scoped runtime leases, durable delivery operations, canonical
 // external conversation addresses, and bounded per-session heartbeat outcome context.
@@ -94,7 +95,7 @@ export { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
 // The v4 session/transcript flip and main's v2 memory-identity
 // change is folded in structure-gated (migrateMemoryIndexSourcesIdentity), so
 // v2 main DBs and pre-merge v4 flip DBs both converge on this schema.
-export const OPENCLAW_AGENT_SCHEMA_VERSION = 12;
+export const OPENCLAW_AGENT_SCHEMA_VERSION = 13;
 const OPENCLAW_AGENT_DB_DIR_MODE = 0o700;
 const OPENCLAW_AGENT_DB_FILE_MODE = 0o600;
 const OPENCLAW_AGENT_DB_SLOW_OPEN_MS = 1_000;
@@ -400,6 +401,19 @@ function migrateOpenClawAgentSchema(db: DatabaseSync): void {
       ALTER TABLE sessions_new RENAME TO sessions;
     `);
   backfillTranscriptMutationWatermarks(db);
+}
+
+/** Backfill one generation token without copying or rewriting transcript rows. */
+function migrateSessionTranscriptGenerations(db: DatabaseSync, previousVersion: number): void {
+  if (previousVersion >= 13) {
+    return;
+  }
+  db.prepare(
+    `INSERT OR IGNORE INTO session_transcript_generations (session_id, generation, updated_at)
+     SELECT session_id, lower(hex(randomblob(16))), ?
+     FROM transcript_events
+     GROUP BY session_id`,
+  ).run(Date.now());
 }
 
 function migrateSessionTranscriptActiveProjection(db: DatabaseSync, previousVersion: number): void {
@@ -774,6 +788,7 @@ function ensureAgentSchema(db: DatabaseSync, agentId: string, pathname: string):
       migrateMemoryIndexSourcesIdentity(db);
       migrateOpenClawAgentSchema(db);
       db.exec(OPENCLAW_AGENT_SCHEMA_SQL);
+      migrateSessionTranscriptGenerations(db, previousVersion);
       migrateConversationDeliveryTargetColumn(db);
       migrateSessionTranscriptActiveProjection(db, previousVersion);
       if (previousVersion < 11) {
