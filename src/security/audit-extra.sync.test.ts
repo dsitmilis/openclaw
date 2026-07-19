@@ -5,6 +5,7 @@ import {
   collectAttackSurfaceSummaryFindings,
   collectSmallModelRiskFindings,
 } from "./audit-extra.summary.js";
+import { collectSecretsInConfigFindings } from "./audit-extra.sync.js";
 
 vi.mock("../plugins/web-search-credential-presence.js", () => ({
   hasConfiguredWebSearchCredential: () => false,
@@ -128,5 +129,39 @@ describe("collectSmallModelRiskFindings", () => {
     for (const snippet of detailExcludes) {
       expect(finding.detail).not.toContain(snippet);
     }
+  });
+});
+
+describe("collectSecretsInConfigFindings", () => {
+  it("does not warn about gateway password when it is a file or exec SecretRef", () => {
+    const configWithFileRef = {
+      gateway: {
+        auth: {
+          password: {
+            source: "file",
+            provider: "default",
+            id: "/secrets/gateway-password",
+          },
+        },
+      },
+    } as any;
+    const findings = collectSecretsInConfigFindings(configWithFileRef, configWithFileRef);
+    expect(findings.some((f) => f.checkId === "config.secrets.gateway_password_in_config")).toBe(
+      false,
+    );
+  });
+
+  it("warns about gateway password when it is a plain text password", () => {
+    const configWithPlaintext = {
+      gateway: {
+        auth: {
+          password: "my-plain-password",
+        },
+      },
+    } as any;
+    const findings = collectSecretsInConfigFindings(configWithPlaintext, configWithPlaintext);
+    expect(findings.some((f) => f.checkId === "config.secrets.gateway_password_in_config")).toBe(
+      true,
+    );
   });
 });

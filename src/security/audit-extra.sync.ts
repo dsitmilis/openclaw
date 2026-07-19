@@ -14,6 +14,7 @@ import { isToolAllowedByPolicies } from "../agents/tool-policy-match.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { GatewayAuthConfig } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { coerceSecretRef } from "../config/types.secrets.js";
 import type { AgentToolsConfig } from "../config/types.tools.js";
 import { resolveGatewayAuth, type ResolvedGatewayAuth } from "../gateway/auth.js";
 import { resolveAllowedAgentIds } from "../gateway/hooks-policy.js";
@@ -578,10 +579,15 @@ export function collectSyncedFolderFindings(params: {
   return findings;
 }
 
-export function collectSecretsInConfigFindings(cfg: OpenClawConfig): SecurityAuditFinding[] {
+export function collectSecretsInConfigFindings(
+  cfg: OpenClawConfig,
+  sourceConfig: OpenClawConfig = cfg,
+): SecurityAuditFinding[] {
   const findings: SecurityAuditFinding[] = [];
+  const rawPassword = sourceConfig.gateway?.auth?.password;
+  const isPasswordRef = rawPassword ? coerceSecretRef(rawPassword) !== null : false;
   const password = normalizeOptionalString(cfg.gateway?.auth?.password) ?? "";
-  if (password && !looksLikeEnvRef(password)) {
+  if (password && !isPasswordRef && !looksLikeEnvRef(password)) {
     findings.push({
       checkId: "config.secrets.gateway_password_in_config",
       severity: "warn",
@@ -593,8 +599,15 @@ export function collectSecretsInConfigFindings(cfg: OpenClawConfig): SecurityAud
     });
   }
 
+  const rawHooksToken = sourceConfig.hooks?.token;
+  const isHooksTokenRef = rawHooksToken ? coerceSecretRef(rawHooksToken) !== null : false;
   const hooksToken = normalizeOptionalString(cfg.hooks?.token) ?? "";
-  if (cfg.hooks?.enabled === true && hooksToken && !looksLikeEnvRef(hooksToken)) {
+  if (
+    cfg.hooks?.enabled === true &&
+    hooksToken &&
+    !isHooksTokenRef &&
+    !looksLikeEnvRef(hooksToken)
+  ) {
     findings.push({
       checkId: "config.secrets.hooks_token_in_config",
       severity: "info",
